@@ -5,4 +5,5 @@ University: [Master of Science in Applied Information & Data Science](https://ww
 Work status: in progress
 
 Task: tbd
+
 Results: to be delivered
