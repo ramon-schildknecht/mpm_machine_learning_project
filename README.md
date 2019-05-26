@@ -8,6 +8,8 @@ Authors: Daniel Barco, Lars Gisler, Ramon Schildknecht, Marcel Ulrich, Carmela W
 
 Task: generate regression and classification models, details can be found [here](https://www.evernote.com/l/Ai-Onl2Oy4hL6KCP9yPgcxFT4t2k88VCfgo)
 
-Results: can be found here (add link to RPubs)
+Results: can be found [here](https://rpubs.com/ramon_schildknecht/mpm_machine_learning_project)
+
+Code: can be found in the folder "final_solution_mpm_group3"
 
 
