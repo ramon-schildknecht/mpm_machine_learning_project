@@ -1,6 +1,6 @@
 # Applied Machine Learning and Predictive Modeling - Group Project Lending Club Loan Data
 
-University: [Master of Science in Applied Information & Data Science](https://www.hslu.ch/en/lucerne-school-of-business/degree-programmes/master/applied-information-and-data-science/)
+**University**: [Master of Science in Applied Information & Data Science](https://www.hslu.ch/en/lucerne-school-of-business/degree-programmes/master/applied-information-and-data-science/)
 
 Module: Applied Machine Learning and Predictive Modelling
 
