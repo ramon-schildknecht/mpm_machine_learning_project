@@ -1,0 +1,5 @@
+"","model","MSE","R2"
+"1","LM with Best Subset Selection",1.372,0.928
+"2","LM with LOOCV",1.375,0.9263
+"3","Ridge Regression",1.708,0.9174
+"4","Lasso Regression",2.604,0.8867

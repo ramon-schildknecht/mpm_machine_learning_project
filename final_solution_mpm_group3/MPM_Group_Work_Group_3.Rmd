@@ -1,0 +1,1134 @@
+---
+title: "MPM Group Work - Group 3"
+date: "27.5.2019"
+author:
+- Daniel Barco
+- Lars Gisler
+- Ramon Schildknecht
+- Marcel Ulrich
+- Carmela Wey
+output:
+  html_document:
+    df_print: paged
+    theme: united
+    toc: yes
+    # number_sections: true
+    toc_float: true
+  pdf_document:
+    toc: yes
+  word_document: default
+---
+
+<br>
+<br>
+
+# Abstract
+
+**Task 1**: We aim at finding a regression for estimating the interest rate applied to a particular lending request. <br>
+Solution: We used four linear model (LM) approaches and got the following results:
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Preload two necessary packages
+library(tidyverse)
+library(magrittr)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+(regression_results <- read.csv("data/regression_methods_results.csv") %>% select(Model = model, MSE, R2))
+```
+
+According to our results the linear regression model approach with best subset selection has the smallest MSE (1.372) overall. The linear regression model with leave one out cross validation is nearly as good with a MSE of 1.375. The ridge and the lasso regression perform noticeable worse (MSE of 1.708 and 2.064). Details to the winnig model with best subset selection can be found below.
+
+Question | Answer
+------------- | -------------
+1. Is at least one of the predictores X1, X2, ..., Xp useful in predicting the response?  | First, one could reduce the possible predictors in the data preprocessing  part. One could remove 126 out of 147 possible predictors, because they would not explain the response at all (93 predictors with more than 5% missing values or just one level) or there were too many levels (more than 10). Some of the few 126 removed predictors were a human decision, especially if the predictors were not understable in regard to the response. Back to the original question: Yes, there were 31 predictors useful in predicting the response. Due to matrix transformation there are a lot of new dummy variables out of the 21 remaining predictors, for example grade, home_ownership or loan_status.
+2. Do all the predictors help to explain Y, or is only a subset of the predictors useful?  | No, only 31 of the preditors help to explain of the response. One could try to only take 23 predictors because one can reduce most of the test error with them. 
+3. How well does the model fit the data? How accurate is the prediction? | Quite well. The remaining test error (MSE) is 1.375. 
+
+
+<br>
+<br>
+
+**Task 2**: We would like to find a classification model for the default status. <br>
+
+We performed the following methods and got the these results:
+
+```{r message=FALSE, warning=FALSE}
+classification_results <- read.csv("data/classification_methods_results.csv")
+classification_results %>% rename(Model = X)
+```
+
+
+If the objective is to reduce the class error of the defaulted loans then the PCA in combination with a logistic regression would be the most appropriate method. If however the overall test error is the objective then a simple pruned tree model might be more appropriate. In addition, we should note that the PCA is an unsupervised method and is therefore inadequate for explaining models. Bottom line: The tree model offers the best solution that is explainable and understandable. 
+
+<br>
+<br>
+
+
+# Data Preparation
+## Load Packages
+```{r Load Packages, message=FALSE, warning=FALSE}
+# load remaining packages
+library(DataExplorer) # https://github.com/boxuancui/DataExplorer
+library(glmnet)
+library(janitor) # https://github.com/sfirke/janitor
+library(plotly)
+library(GGally)
+library(corrplot)
+library(PerformanceAnalytics)
+library(caret)
+library(leaps)
+library(knitr)
+library(pls)
+library(ISLR)
+library(dplyr)
+library(randomForest)
+library(tree)
+library(gdata)
+library(class)
+```
+
+<br><br>
+
+## Set Options
+```{r Set Options}
+# set printing preferences
+options(scipen = 99) # penalty for displaying scientific notation
+options(digits = 4) # suggested number of digits to display
+```
+
+<br><br>
+
+## Load Data
+
+The following code loads the data from Kaggle, filters the data to the date range from 2007 to 2015 and selects the subset for group 3 according to the lecturer instructions. One can skip the following part because our team provids the prepared data in the next section.
+
+```{r Data Load 1/2, eval=FALSE, include=TRUE}
+# preparation step: loading data from https://www.kaggle.com/wendykan/lending-club-loan-data
+# load data
+data_temp <- read_csv("data/loan.csv")
+
+# select years 2007 - 2015
+data_temp %<>% 
+  mutate(year_temp = as.integer(str_sub(issue_d,-4,-1))) %>%
+  filter(year_temp >= 2007,
+         year_temp <= 2015)
+
+# subset our group subset
+# d <- data_temp[which(data_temp$id%%8+1==6),] # not working: no id values
+
+data_temp_2 <- cbind(id_2 = rownames(data_temp), data_temp)
+rownames(data_temp_2) <- 1:nrow(data_temp_2)
+data_temp_2$id_2 <- as.numeric(data_temp_2$id_2)
+dataset_3 <- data_temp_2[which(data_temp_2$id_2%%8+1==3),]
+
+# we continue working with d for easier coding reasons
+d <- dataset_3 
+
+# transform data frame into much nicer tibble format for working with
+# huge datasets
+d <- as_tibble(d)
+
+# remove big data file for memory reasons
+rm(data_temp)
+rm(data_temp_2)
+rm(dataset_3)
+
+# write group 3 data
+path_file <- "./data/data_group_3.csv"
+if (!file.exists(path_file)) {
+  write_csv(d, path = "data/data_group_3.csv")
+}
+```
+
+One can load the necessary data for the regression and classification in the following section.
+
+```{r Data Load 2/2, message=FALSE, warning=FALSE}
+# import already generated file for group 3 
+d <- read_csv("data/data_group_3.csv") #, n_max = 2000) 
+d <- as_tibble(d)
+```
+
+
+## Data Exploration
+
+```{r eval=FALSE, echo=TRUE}
+compare_df_cols(d) %>% arrange(d, column_name) %>% count(d) %>% arrange(desc(n))
+d %>% remove_empty(c("rows", "cols")) # shows 14 empty columns
+d %>% remove_constant() # shows no column with just single values
+d %>% get_dupes() # there are no duplicates
+# explore interest rate
+d %>% tabyl(int_rate) %>% arrange(desc(n)) %>% plot_ly(x = ~n, type = "histogram")
+d %>% tabyl(int_rate) %>% arrange(desc(n)) %>% plot_ly(x = ~n, type = "box")
+```
+
+
+<br><br>
+<br><br>
+<br><br>
+
+
+# Task 1: Regression
+## Preparation
+
+- NAs identification and removal of 93 columns containing equal and more than 5% of NA values. 
+
+```{r, message=FALSE, warning=FALSE}
+# create copy of dataset
+d_copy <- d
+
+# data preparation --> check for NAs in int_rate and remove them if there are any
+d %>%
+  select(int_rate) %>%  
+  summarise_all(funs(sum(is.na(.))))
+# there are no NAs --> nothing to do
+
+#further NAs investigation
+## too much variables to see all NAs attributes clearly --> split variables
+plot_missing(d[1:30])
+plot_missing(d[31:60])
+plot_missing(d[61:90])
+plot_missing(d[91:120])
+plot_missing(d[121:147])
+## there are a lot of variables with an NA-Quota bigger than 5%
+
+# generate columns where NA quota is bigger or equal than 5% of rows
+d_na_quoate_bigger_equals_0.05 <- d %>% summarise_all(funs(sum(is.na(.)))) %>% t() %>% 
+  as.data.frame() %>% rownames_to_column("column_names") %>% as_tibble() %>% 
+  select(count = V1, everything()) %>% arrange(desc(count)) %>% 
+  mutate(quote = count/length(d$id)) %>% filter(quote >= 0.05)
+(d_count_columns_na_quoate_bigger_equals_0.05 <- length(d_na_quoate_bigger_equals_0.05$column_names))
+# 93 columns with NA quote >= 5%
+
+# remove 93 columns with NA quota >= 0.05%
+d_filter_temp <- d %>% summarise_all(funs(sum(is.na(.)))) %>% t() %>% 
+  as.data.frame() %>% rownames_to_column("column_names") %>% as_tibble() %>% 
+  select(count = V1, everything()) %>% arrange(desc(count)) %>% 
+  mutate(quote = count/length(d$id)) %>% filter(quote < 0.05)
+
+d_filter_temp %<>% select(column_names)
+d %<>% select(d_filter_temp$column_names)
+dim(d)[2]
+# success: only 54 columns left!
+```
+
+<br><br>
+
+## Prepare valid dataset for regression and classification
+
+- remove remaining rows with NAs 
+
+```{r}
+# inspect remaining variables
+plot_missing(d) # success!
+
+# create backup copy containing NAs
+d_with_nas <- d
+
+# remove rows with NAs
+d %<>% na.omit() # 2347 NAs removed
+
+# create new data frame for part 2 (classification)
+d_na_less_5_percent <- d
+# write data for classification
+path_file <- "./data/d_na_less_5_percent.csv"
+if (!file.exists(path_file)) {
+  write_csv(d, path = "data/d_na_less_5_percent.csv")
+}
+```
+
+<br><br>
+
+## Prepare Dataset for regression task
+
+- remove categorial variables with more than 10 levels 
+- subjective removal of variables: columns with just one value and not understandable variables 
+
+```{r}
+introduce(d) %>%  t()
+plot_intro(d)
+plot_bar(d) # 7 columns ignored with more than 50 categories.
+# last_pymnt_d: 129 categories
+# title: 9652 categories
+# earliest_cr_line: 624 categories
+# last_credit_pull_d: 127 categories
+# issue_d: 99 categories
+# zip_code: 874 categories
+# addr_state: 51 categories
+
+# generate a list of unique counts per column
+(d_unique_counts_per_column <- d %>% summarise_all(list(~n_distinct(.))) %>% t() %>% as.data.frame() %>% rownames_to_column("column_names") %>% as_tibble() %>% 
+    select(count = V1, everything()) %>% arrange(desc(count)))
+
+# assumption: select most important columns according to subjective evaluation
+## filter e. g. columns with just one unique value, not understandable meaning, 
+## in general columns <= 10 distinct values, 
+d %<>% select(int_rate, loan_amnt, revol_bal, revol_util, funded_amnt_inv, annual_inc, pub_rec_bankruptcies, 
+            term, pymnt_plan, initial_list_status, application_type, hardship_flag, debt_settlement_flag, 
+            verification_status, home_ownership, acc_now_delinq, grade, collections_12_mths_ex_med, loan_status,
+            chargeoff_within_12_mths, year_temp)
+
+# write file for easier regression analysis start
+path_file <- "./data/data_group_3_regression.csv"
+if (!file.exists(path_file)) {
+  write_csv(d, path = "data/data_group_3_regression.csv")
+}
+```
+
+<br><br>
+
+## Load prepared data
+
+One who would just perfrom the regression models could directly start here. The necessary data are provided in the next code block.  
+
+```{r}
+# starting with the following data for regression task
+d <- read_csv("data/data_group_3_regression.csv")
+```
+
+<br><br>
+
+## Regression data exploration
+
+The following regression models answer to following questions (from "An Introduction to Statistical Learning", Springer, 2017, Page 75):
+
+1. Is at least one of the predictores X1, X2, ..., Xp useful in predicting the response? 
+2. Do all thr predictors help to explain Y, or is only a subset of the predictors useful? 
+3. How well does the model fit the data? How accurate is the prediction? 
+
+One finds the answers at the end of this regression analysis part.
+
+```{r}
+ggpairs(d[, 1:3]) 
+# ggpairs(d) # not really working for all data
+
+# show scatterplots, distributions & correlations
+set.seed(22)
+d %>%
+  sample_n(1000) %>% 
+  select(c(1:7, 16, 18, 20, 21)) %>% 
+  na.omit() %>% 
+  chart.Correlation(histogram = TRUE, pch = 19) # better than cor() %>%corrplot()
+  
+
+### show patterns ###
+plot_bar(d, with = "int_rate")
+plot_boxplot(d, by = "int_rate")
+plot_histogram(d)
+plot_scatterplot(split_columns(d)$continuous, by = "int_rate", sampled_rows = 1000L)
+```
+
+There are no strong correlations between int_rate and all other variables. One assumes that we need several predictors for a suitable model. Interesting: There is a very strong correlation between loan_amount and funded_amnt_inv. 
+
+<br>
+
+## Validation set approach
+
+- Split data in training (67%) and test set (33%). 
+- Removal of rows with troublesome value "NONE" 
+
+```{r}
+# Split the data into training and test set
+set.seed(22)
+training_samples <- d$int_rate %>%
+  createDataPartition(p = 0.67, list = FALSE)
+train_data  <- d[training_samples, ]
+test_data <- d[-training_samples, ]
+# remove NONE values which cause problems regarding model generation
+test_data %<>% filter(home_ownership != "NONE")
+train_data %<>% filter(home_ownership != "NONE")
+
+```
+
+<br><br>
+
+## Models
+### Exploratory linear regression
+
+- try simple linear model as a first exploratory approach
+- improve first model 
+
+
+```{r}
+# Build the model first try
+lm_model <- lm(int_rate ~ ., data = train_data)
+summary(lm_model)
+
+# remove not significant predictors
+train_data_lm <- train_data %>% select(-pymnt_plan, -collections_12_mths_ex_med)
+test_data_lm <- test_data %>% select(-pymnt_plan, -collections_12_mths_ex_med)
+
+# second try
+lm_model <- lm(int_rate ~ ., data = train_data_lm)
+summary(lm_model)
+
+table(d$pymnt_plan) # clear distribution > most of the values are no, only 9 values are yes > predictor can be removed
+table(d$collections_12_mths_ex_med) # more or less clear distribution > most of the values are in categorie 0 > predictor can be removed
+
+# other not significant predictors in the lm-Modell can't be removed because they have categories which don't
+# show a clearly recognisable distribution of the values, for example
+table(d$loan_status) # not a clear distribution > predictor can't be removed
+table(d$home_ownership)
+
+# Make predictions and compute the R2, RMSE and MAE
+lm_predictions <- lm_model %>% predict(test_data)
+summary(lm_predictions)
+na_filter <- lm_predictions[!is.na(lm_predictions)]
+# show measures for model quality
+(lm_evaluation_vsa <-
+  data.frame(
+    R2 = caret::R2(lm_predictions[na_filter], test_data$int_rate[na_filter]),
+    RMSE = caret::RMSE(lm_predictions[na_filter], test_data$int_rate[na_filter]) # ,
+    # MAE = MAE(lm_predictions[na_filter], test_data$int_rate[na_filter])
+  ))
+```
+
+<br><br>
+
+### Leave one out cross validation (LOOCV)
+
+- Perform LOOCV 
+
+```{r}
+# Leave one out cross validation - LOOCV
+# Define training control
+train_control <- trainControl(method = "LOOCV")
+# Train the model
+set.seed(22)
+d_sample <- d %>% sample_n(2000) %>% na.omit()
+# check if there is just one unique value per column: hit with "pymnt_plan" and "hardship_flag"
+d_sample %>% summarise_all(list(~n_distinct(.))) %>% t() %>% as.data.frame() %>% rownames_to_column("column_names") %>% as_tibble() %>% 
+  select(count = V1, everything()) %>% arrange(count)
+d_sample %<>% select(-c(pymnt_plan, hardship_flag, application_type))
+## the following loocv code snippet works within this environment (one could have problems with mac)
+# sessionInfo()
+lm_model_loocv <- train(int_rate ~ ., data = d_sample, method = "lm",
+               trControl = train_control)
+
+# Summarize the results
+(lm_evaluation_loocv <- lm_model_loocv)
+print("MSE: ")
+(loocv_mse <- lm_evaluation_loocv$results$RMSE^2)
+# comparison to validation set approach: slightly worse at R2 and RMSE but better MAE
+```
+
+<br>
+
+__Model Evalution:__  
+
+One advantage of the LOOCV approach is that almost the entire dataset (n-1 observations) can be used for training, which results in less bias and constant estimates for the test MSE. The model is fit n times with n-1 observations, whereas the one remaining observation is used to test the model. This results in n test MSE, whereas the LOOCV estimate for the overall test MSE is the average of these n test MSE.
+
+LOOCV Test MSE: 1.375
+
+
+<br>
+
+
+### Linear regression with best subset selection
+- comparing models with validation set approach
+- using MSE as a measure of validation set error
+
+```{r Linear regression with best subset selection}
+dim(train_data) # 20 predictors (21-1). -1 because of int_rate
+
+# creates a model matrix by expanding factors to a set of dummy variables.
+# This matrix is later used to calculate the test MSE for various models
+test_mat <- model.matrix(int_rate~.,data=test_data)
+
+# when considering all dummy variables there are 34 predictors (35-1): -1 because of intercept.
+dim(test_mat)
+
+# create best subset selection with 1 up to all 35 predictors.
+regfit_best <- regsubsets(int_rate~.,data=train_data, nvmax=34)
+reg_summary <- summary(regfit_best)
+reg_summary # models with up to 33 predictors were included.
+
+# Analysis of various metrics to assess the models
+par(mfrow=c(2,2))
+# plot R square
+plot(reg_summary$rss ,xlab=" Number of Variables ",ylab="RSS", type="l")
+# plot adusted R-square
+plot(reg_summary$adjr2 ,xlab =" Number of Variables ", ylab="Adjusted RSq",type="l")
+which.max (reg_summary$adjr2)  # maximal adusted R-square: 29
+points (29, reg_summary$adjr2[29], col ="red",cex =2, pch =20)
+# plot CP
+plot(reg_summary$cp ,xlab =" Number of Variables ", ylab="CP",type="l")
+which.min (reg_summary$cp ) # minimal CP with 27 predictors
+points (27, reg_summary$cp[27], col ="red",cex =2, pch =20)
+# plot BIC
+plot(reg_summary$bic ,xlab =" Number of Variables ", ylab="BIC",type="l")
+which.min (reg_summary$bic ) # minimal BIC with 23 predictors
+points (23, reg_summary$bic[23], col ="red",cex =2, pch =20)
+
+# model of does not seem to improve much anymore after 6 predictors are included.
+coefi=coef(regfit_best ,id=6) # get coefficients
+pred_6=test_mat[,names(coefi)]%*%coefi # predict value for each observation with model and test data
+test_error_6=mean((test_data$int_rate-pred_6)^2) # calculate test error
+# -> test error for model with 6 predictors: 3.015
+
+# next step: compare the test MSE of the various models with 1 predictor up to 33 predictors.
+
+test_errors=rep(NA ,33) # create empty list
+# search for each size i, the best model of that size
+for(i in 1:33){ 
+  coefi = coef(regfit_best ,id=i) # get coefficients
+  pred = test_mat[,names(coefi)]%*%coefi # predict value for each observation with model and test data
+  test_errors[i] = mean((test_data$int_rate-pred)^2) # calculate test error
+}
+test_errors # show all test errors
+test_errors[which.min(test_errors)] # test error of best model: 1.372
+which.min(test_errors) # model with minimal test error: 31
+par(mfrow=c(1,1))
+plot(test_errors, type="l", main="Test Error") # plot the test error of all modelss
+points(31, test_errors[31], col ="red",cex =2, pch =20) # mark test error of model with 31 variables.
+
+# Plausibility Check:
+# the output of best subset selection (regsubset) was that the test error decreases with every new added predictor up to 31 variables.
+# Therefore test the linear regression by including all parameters and compare the test errors:
+lm_2 <- lm(int_rate~., data = train_data) # linear regression with all predictors
+summary(lm_2)
+lm_2_pred <- predict(lm_2, test_data) # predict int_rate based on test data
+test_errors_2 <- mean((test_data$int_rate-lm_2_pred)^2) # calculate test error
+test_errors_2 # test error: 1.372
+# test error is equal to previous test error that was found with best subset selection
+
+```
+
+<br>
+
+__Model Evaluation:__  
+
+Models with various complexity with 1 predictor up to 33 predictors were created with best subset selection and were compared with the validation set approach. By analysing the plots of metrics like adjusted R^2, Cp and BIC, ones would think that the model does not improve much anymore with more than 6 predictors. So in a first step the test MSE was calculated for a model with 6 predictors. The model with 6 predictors resulted in a test MSE of 3.015.
+In a next step the test MSE of all 33 models were compared. The plot of all test MSE shows that the test MSE decreases with every new predictor up to the model with 31 predictors. The test MSE of the model with 31 predictors is 1.372, which is much smaller than the test MSE that was found for a model with 6 predictors. 
+
+
+<br><br>
+
+### Ridge regression
+
+```{r Ridge Regression, message=FALSE, warning=FALSE}
+# using method from http://www.sthda.com/english/articles/37-model-selection-essentials-in-r/153-penalized-regression-essentials-ridge-lasso-elastic-net/
+# creating matrix
+x=model.matrix(int_rate~., d)[, -1]
+y=d$int_rate
+
+# Predictor variables train data
+x_train <- model.matrix(int_rate~., train_data)[,-1]
+
+# Outcome variable train data
+y_train <- train_data$int_rate
+
+
+# Find the best lambda using cross-validation
+set.seed(22) 
+cv <- cv.glmnet(x_train, y_train, alpha = 0)
+
+# Display the best lambda value using cross-validation
+cv$lambda.min
+
+
+# Fit the final model on the training data
+model_train <- glmnet(x_train, y_train, alpha = 0, lambda = cv$lambda.min)
+model_train
+
+
+# Display regression coefficients
+coef(model_train)
+
+
+# Make predictions on the test data
+x_test <- model.matrix(int_rate~., test_data)[,-1]
+y_test <- test_data$int_rate
+
+model_test <- model.matrix(int_rate ~., test_data)[,-1]
+predictions <- model_train %>% predict(model_test) %>% as.vector()
+
+
+# Model performance metrics
+data.frame(
+  RMSE = caret::RMSE(predictions, test_data$int_rate),
+  Rsquare = caret::R2(predictions, test_data$int_rate)
+)
+
+
+# Mean squared error
+mean((predictions - y_test)^2)
+
+
+# Refit ridge regression model on the full data set, using lambda chosen by cross-validation
+modell_full_data_set <- glmnet(x, y, alpha = 0)
+predict(modell_full_data_set, type="coefficients", s=cv$lambda.min)
+
+print("MSE")
+mean((predictions-test_data$int_rate)^2)
+```
+
+<br>
+
+__Model Evaluation:__  
+
+In general ridge regression reduces the variance of the ridge coefficient estimates by shrinking them towards zero. In order to do so, a good tuning parameter lambda needs to be selected to adjust the trade-off between coefficient shrinkage and RSS reduction.
+Lambda was optimized by using cross validation. The best lambda was determined to be 0.216.
+<br>
+The examination of the ridge coefficent estimates shows that the coefficents of the following predictors was shrinked to almost zero:  
+  
+- loan_amnt 
+- revol_bal
+- funded_amnt_inv 
+- annual_inc
+
+<br>
+Highest coefficent were found for the following predictors:  
+
+- grade 
+- loan_status 
+
+<br>
+The test MSE for the ridge regression model resulted in 1.708.
+
+<br>
+
+
+### Lasso regression with 10-fold cross validation
+
+```{r Lasso regression, message=FALSE, warning=FALSE}
+# using method from http://www.sthda.com/english/articles/37-model-selection-essentials-in-r/153-penalized-regression-essentials-ridge-lasso-elastic-net/
+# Setup a grid range of lambda values:
+lambda <- 10^seq(-3, 3, length = 100)
+
+
+# Build the model
+set.seed(22)
+lasso <- train(
+  int_rate ~., data = train_data, method = "glmnet",
+  trControl = trainControl("cv", number = 10),
+  tuneGrid = expand.grid(alpha = 1, lambda = cv$lambda)
+)
+
+# Model coefficients
+coef(lasso$finalModel, lasso$bestTune$lambda)
+# Make predictions
+predictions <- lasso %>% predict(test_data)
+# Model prediction performance
+data.frame(
+  RMSE = caret::RMSE(predictions, test_data$int_rate),
+  Rsquare = caret::R2(predictions, test_data$int_rate)
+)
+
+print("MSE")
+mean((predictions-test_data$int_rate)^2)
+```
+
+__Model Evaluation:__  
+
+Same as ridge regression, the lasso regression reduces the variance of the ridge coefficient estimates by shrinking them towards zero. In addition, lasso also has the side effect of reducing the number of predictors (Setting the coefficients to zero).
+<br>
+The lasso regression set the coefficents of the following parameters to zero (including dummy variables):
+  
+- loan_amnt
+- revol_bal
+- funded_amnt_inv
+- annual_inc
+- pub_rec_bankruptcies
+- pymnt_plany
+- application_typeJoint App
+- hardship_flagY
+- debt_settlement_flagY
+- verification_statusSource Verified
+- home_ownershipOTHER
+- home_ownershipOWN
+- home_ownershipRENT
+- acc_now_delinq
+- collections_12_mths_ex_med
+- loan_statusCurrent
+- loan_statusDoes not meet the credit policy. Status:Charged Off
+- loan_statusDoes not meet the credit policy. Status:Fully Paid
+- loan_statusFully Paid
+- loan_statusIn Grace Period
+- loan_statusLate (16-30 days)
+- loan_statusLate (31-120 days)
+- chargeoff_within_12_mths
+  
+<br>
+The test MSE for the lasso regression model resulted in 2.604.
+
+<br>
+
+## Discussion / Model comparison and evaluation
+
+```{r}
+model_comparison <-  tibble(model = c("LM with LOOCV", "LM with Best Subset Selection", "Ridge Regression", "Lasso Regression"),
+       MSE = c(1.375, 1.372, 1.708, 2.604),
+       R2 = c(0.9263, 0.928, 0.9174, 0.8867))
+
+(model_comparison %<>% arrange(MSE))
+write.csv(model_comparison, file = "data/regression_methods_results.csv")
+```
+
+<br>
+
+According to the table above the linear regression model with best subset selection has the smallest MSE (1.372) overall. The linear regression model with leave one out cross validation is nearly as good with a MSE of 1.375. The ridge and the lasso regression perform noticeable worse (MSE of 1.708 and 2.064). Details to the winnig model with best subset selection can be found below.
+
+
+Initial question | Answer
+------------- | -------------
+1. Is at least one of the predictores X1, X2, ..., Xp useful in predicting the response?  | First, one could reduce the possible predictors in the data preprocessing  part. One could remove 126 out of 147 possible predictors, because they would not explain the response at all (93 predictors with more than 5% missing values or just one level) or there were too many levels (more than 10). Some of the few 126 removed predictors were a human decision, especially if the predictors were not understable in regard to the response. Back to the original question: Yes, there were 31 predictors useful in predicting the response. Due to matrix transformation there are a lot of new dummy variables out of the 21 remaining predictors, for example grade, home_ownership or loan_status.
+2. Do all the predictors help to explain Y, or is only a subset of the predictors useful?  | No, only 31 of the preditors help to explain of the response. One could try to only take 23 predictors because one can reduce most of the test error with them. 
+3. How well does the model fit the data? How accurate is the prediction? | Quite well. The remaining test error (MSE) is 1.375. 
+
+
+
+## Possible next steps
+One reasonable approach could involve testing non-linear regression models by checking the non-linearity of the response-predictor relationsships. 
+Additionally one could further investigate in problems such as outliers, collinearity or residual analysis (correlation of error termws, non-constant variance of error terms, ...). 
+Finally one should better understand the business domain to improve model results and interpretation.
+Furthermore the numerical predictors could be standardized before applying various regression models, so that all predictors are on the same scale.
+
+
+
+<br><br>
+<br><br>
+<br><br>
+
+
+# Taks 2: Classification
+
+<br>
+
+## Data Preperation
+Our goal in the second part of the assignment is to predict if a new customer will be able to fully pay back their loans using a classification method. Therefore, we focus on the "concluded lends" in the data set, i.e. on all loans where the loan_status is not Current. To this end, we filter out all observations with loan_status == Current.
+
+```{r}
+# load data
+d_na_less_5_percent <- read.csv("data/d_na_less_5_percent.csv",stringsAsFactors = T)
+
+# create subset with loan_status = current
+d2_sub <- subset(d_na_less_5_percent,loan_status != "Current")
+
+# check how much loan status varibales we have
+d2_sub$loan_status <- gsub("Does not meet the credit policy. Status:Fully Paid", "Fully Paid", d2_sub$loan_status)
+d2_sub$loan_status <- gsub("Does not meet the credit policy. Status:Charged Off", "Fully Paid", d2_sub$loan_status)
+d2_sub$loan_status <- gsub("Current", "Defaulted", d2_sub$loan_status)
+d2_sub$loan_status <- gsub("Charged Off", "Defaulted", d2_sub$loan_status)
+d2_sub$loan_status <- gsub("In Grace Period", "Defaulted", d2_sub$loan_status)
+d2_sub$loan_status <- gsub("Late \\(31-120 days\\)", "Defaulted", d2_sub$loan_status)
+d2_sub$loan_status <- gsub("Late \\(16-30 days\\)", "Defaulted", d2_sub$loan_status)
+
+# create subset
+d2_sub$loan_status <- as.factor(d2_sub$loan_status)
+
+
+# replace home ownership "NONE" with "OTHER"
+d2_sub$home_ownership <- as.factor(gsub("NONE", "OTHER", d2_sub$home_ownership))
+d2_sub %<>% na.omit()
+summary(d2_sub)
+```
+
+We have converted all loan_status that are not fully paid into defaulted. We have also replaced "home_ownership" NONE with OTHER.
+
+<br><br>
+
+## PCA
+
+1. Use Principal Component Analysis for base transformation and then compare it with the Partial Least Squares Regression result. Select the best base with cross validation, using the better of the two approaches.
+
+We now transform the dataset using the Principal component analaysis (PCA). The following code prepares the data for the PCA. The PCA compution (prcomp) does not allow any variables to be factors or any NAs we therefore transform the factors to numeric and remove the NAs. Also we reduce the levels of factors to maximum 10. Then we create a test and training set and we transform the base of the training set using PCA. 
+
+```{r}
+
+# load previous df
+df.pca <- d2_sub
+# str(df.pca)                                             # check
+
+# remove factors larger than 10
+plus10levels <- df.pca[, sapply(df.pca, function(col) class(col) == "factor")]
+plus10levels <-  plus10levels[, sapply(plus10levels, function(col) length(unique(col))) > 10]
+rmv.col <- colnames(plus10levels)
+str(rmv.col) # columns to be removed
+df.pca <- df.pca[ , !(names(df.pca) %in% rmv.col)]
+# str(df.pca)                                             # check
+
+# transform factors to numeric, except for loan_status
+str(df.pca)
+for(col in 1:ncol(df.pca)){
+  if(class(df.pca[,col]) %in% c('factor') && colnames(df.pca)[col] != 'loan_status'){
+    df.pca[,col] <- as.numeric(df.pca[,col])
+  }
+}
+# str(df.pca)                                             # check
+
+# remove NAs
+drop_na(df.pca)
+str(df.pca)
+
+# check dimnames, mean and variance
+dimnames(df.pca)[[2]]
+apply(df.pca,2,var)
+summary(df.pca)
+
+# looks like policy_code and disbursement_method have variance 0 and mean 1, we can remove these two variables
+df.pca <- subset(df.pca, select = -c(policy_code,disbursement_method))
+# str(df.pca)                                             # check
+
+# devide and conquer 80% train, 20% test data
+p80 <- nrow(df.pca)*0.8
+set.seed(13)
+indices <- sort(sample(1:nrow(df.pca), p80)) # select 100 random samples
+test.pca <- df.pca[-indices,]
+train.pca <- df.pca[indices,]
+train.log.pca <- train.pca
+test.log.pca <- test.pca
+
+# remove loan_status from test and train set
+y.train.pca <- train.pca$loan_status
+y.test.pca <- test.pca$loan_status
+train.pca <- subset(train.pca, select = -c(loan_status))
+test.pca <- subset(test.pca, select = -c(loan_status))
+# str(df.pca)                                             # check
+
+# conduct PCA
+pca.out = prcomp(train.pca,  scale=T)
+pca.out$rotation
+pca.out$sdev
+
+# % of variance explained
+pr.var <- pca.out$sdev ^2
+pve=pr.var/sum(pr.var)
+pve
+
+# Plot
+plot( cumsum(pve), xlab = "Principal Component",
+      ylab = "Cumulative Proportion of Variance Explained", type = "b" )
+text(cumsum(pve), labels=round(cumsum(pve)*100, digits = 1), cex= 0.7, pos = 2)
+
+
+# try PCA as prediction
+# use 30 PCAs
+pca.train.1_30 <- pca.out$x[,1:30]
+
+# predict PCA on test data set
+pred <- predict(pca.out, test.pca)
+head(pred[,1:30])
+pca.test.1_30 <- pred[,1:30]
+
+log.pca.fit <- glm(train.log.pca$loan_status ~ ., as.data.frame(pca.train.1_30),family="binomial")
+summary(log.pca.fit)
+log.pca.prob <- predict(log.pca.fit, newdata = as.data.frame(pca.test.1_30), type = "response")
+log.pca.pred <- ifelse(log.pca.prob>0.5,"Fully Paid","Defaulted")
+
+# Test errors and confusion matrix
+pca.matrix <- table(log.pca.pred,test.log.pca$loan_status)
+pca.overall.test.err = mean(log.pca.pred != test.log.pca$loan_status)
+pca.default.test.err= pca.matrix[1,2]/(pca.matrix[1,1]+pca.matrix[1,2]) # Class Test Error 
+pca.paid.test.err= pca.matrix[2,1]/(pca.matrix[2,2]+pca.matrix[2,1]) # Class Test Error 
+pca.matrix
+pca.default.test.err
+pca.paid.test.err
+pca.overall.test.err
+
+```
+
+In the graph we can see the cumulative amount of variance explained rises with each additional Principal Component (PC). With 30 PCs we have reached over 99% of Variance Explained and the curve flattens off. We decided to take the smallest amount of PC that could nevertheless explain all most all variance in the data. 
+
+To validate our approach we used Logistic Regression. We used the first 30 PCs and then trained a logistical model on it. We validated the fitted model on the test set, where we applied the same PCA transformation. It resulted in terribly low test error rates for both the classes "Defaulted" (0.66%) and "Fully Paid" (0.77%), as well as the overall error (0.75%)
+
+<br><br>
+
+## PLS
+
+```{r}
+
+# load previous df
+df.pls <- d2_sub
+# str(df.pls)                                 #check
+
+# remove factors larger than 10
+plus10levels <- df.pls[, sapply(df.pls, function(col) class(col) == "factor")]
+plus10levels <-  plus10levels[, sapply(plus10levels, function(col) length(unique(col))) > 10]
+rmv.col <- colnames(plus10levels)
+str(rmv.col) # columns to be removed
+df.pls <- df.pls[ , !(names(df.pls) %in% rmv.col)]
+# str(df.pls)                                 #check
+
+# transform all factors to numeric, also loan_status, otherwise pls function doesn't work
+str(df.pls)
+for(col in 1:ncol(df.pls)){
+  if(class(df.pls[,col]) %in% c('factor')){
+    df.pls[,col] <- as.numeric(df.pls[,col])
+  }
+}
+# str(df.pls)                                 #check
+
+# remove NAs
+drop_na(df.pls)
+# str(df.pls)                                 #check
+
+# check dimnames, mean and variance
+dimnames(df.pls)[[2]]
+apply(df.pls,2,mean)
+apply(df.pls,2,var)
+
+# looks like policy_code and disbursement_method have variance 0 and mean 1, we can remove these two variables
+df.pls <- subset(df.pls, select = -c(policy_code,disbursement_method))
+# str(df.pls)                                 #check
+
+# devide and conquer 80% train, 20% test data
+p80 <- nrow(d2_sub)*0.8
+set.seed(13)
+indices <- sort(sample(1:nrow(df.pls), p80)) # select 100 random samples
+test.pls <- df.pls[-indices,]
+train.pls <- df.pls[indices,]
+
+# pls function
+pls.fit <- plsr(loan_status ~ ., data=train.pls, scale=TRUE, validation ="CV")
+summary(pls.fit)
+
+pls.prob=predict(pls.fit, test.pls ,ncomp=30)
+head(pls.prob)
+summary(pls.prob)
+
+pls.pred <- ifelse(pls.prob>0.5,"Fully Paid","Defaulted")
+
+
+```
+
+The partial least squares method is generally used for numeric continous variables. There is a method namly partial least squares discriminant analysis, that can be used for categorical variables. This however was not further investigated due to time constrains. We convert the loan status variable into a numeric variable. However, this gave us results that we cannot interperate in a useful way. In conclusion to the question asked in Part 2, we must give preference to PCA over PLS, since is not suited for this classification problem.
+
+2. Perform the classification using KNN, Logistic Regression, Decision tree and Random forest. Compare the respective train and test error performances to select one of these approaches. Perform the prediction on the validation set and compute the confusion matrix. 
+
+<br><br>
+
+## Logistic Regression
+
+```{r}
+# devide and conquer 80% train.log, 20% test.data
+set.seed(13)
+indices <- sort(sample(1:nrow(d2_sub), p80)) # select 100 random samples
+test.log <- d2_sub[-indices,]
+train.log <- d2_sub[indices,]
+
+#drop NAs & columns with more than 50 levels or less than 2
+drop_na(train.log) 
+less2levels <-  train.log[, sapply(train.log, function(col) length(unique(col))) < 2]
+plus50levels <-  train.log[, sapply(train.log, function(col) length(unique(col))) > 50]
+plus50levels <- plus50levels[, sapply(plus50levels, function(col) class(col) != "numeric")]
+plus50levels <- plus50levels[, sapply(plus50levels, function(col) class(col) != "integer")]
+rmv.col <- c(colnames(less2levels),colnames(plus50levels))
+rmv.col
+train.log <- train.log[ , !(names(train.log) %in% rmv.col)]
+# str(train.log)                  # check
+
+log.fit <- glm(loan_status ~ ., family="binomial", data=train.log)
+summary(log.fit)
+
+# "Predicting" the train data 
+log.prob <- predict(log.fit, newdata = test.log, type = "response")
+log.pred <- ifelse(log.prob>0.5,"Fully Paid","Defaulted")
+
+# Test errors and confusion matrix
+log.matrix <- table(y.test.pca,log.pred)
+log.overall.test.err = mean(log.pred != test.log$loan_status)
+log.default.test.err= log.matrix[1,2]/(log.matrix[1,1]+log.matrix[1,2]) # Class Test Error 
+log.paid.test.err= log.matrix[2,1]/(log.matrix[2,2]+log.matrix[2,1]) # Class Test Error 
+log.matrix
+log.default.test.err
+log.paid.test.err
+log.overall.test.err
+```
+
+For the Logisitic Regression we used the dataset removing the categorical values with more than 50 levels and those with less than 2. The defaulted test error rate is around 1.7 %, the fully paid test error rate is 0.04 % and the overall test error rate is 0.36 %.
+
+## Random Forest
+
+In this following section we create a random forest model. We will try different amounts of variables chosen randomly at each try (mtry). In theory we could use mtry that is equal to the amount of predictors in the dataset. In practice we will choose only compare mtry between 1 and 10 (the section where we try different mtrys is commented, as it is computionally expensive and time consuming) .
+
+```{r}
+# devide and conquer 80% train.rf, 20% test.data
+set.seed(13)
+indices <- sort(sample(1:nrow(d2_sub), p80)) # select 100 random samples
+test.rf <- d2_sub[-indices,]
+train.rf <- d2_sub[indices,]
+
+#drop NAs & columns with more than 53 categories on train data
+drop_na(train.rf) 
+plus50levels <-  train.rf[, sapply(train.rf, function(col) length(unique(col))) > 50]
+plus50levels <- plus50levels[, sapply(plus50levels, function(col) class(col) != "numeric")]
+plus50levels <- plus50levels[, sapply(plus50levels, function(col) class(col) != "integer")]
+rmv.col <- colnames(plus50levels)
+train.rf <- train.rf[ , !(names(train.rf) %in% rmv.col)]
+# str(train.rf)           check
+
+#d2_sub <- as.data.frame(d2_sub)
+rf.fit <- randomForest(loan_status ~ ., data= train.rf,ntree=400, mtry=4)  
+rf.fit
+importance(rf.fit)
+varImpPlot(rf.fit)
+
+# Uncomment this section only if you have time 
+# check which RF is the most promising, mtry 10 should be sufficient
+# default.train.err=double(10)
+# paid.train.err=double(10)
+# default.test.err=double(10)
+# paid.test.err=double(10)
+# 
+#mtry is no of Variables randomly chosen at each split
+# for(mtry in 1:10) 
+# {
+#   rf=randomForest(loan_status ~ . , data= train.rf,mtry=mtry,ntree=400) 
+#   default.train.err[mtry] = rf$confusion[1,3]
+#   paid.train.err[mtry] = rf$confusion[2,3]
+#   
+#   pred<-predict(rf,test.rf) #Predictions on Test Set for each Tree
+#   default.test.err[mtry]= table(test.rf$loan_status,pred)[1,2]/(table(test.rf$loan_status,pred)[1,1]+table(test.rf$loan_status,pred)[1,2]) # Class Test Error 
+#   paid.test.err[mtry]= table(test.rf$loan_status,pred)[2,1]/(table(test.rf$loan_status,pred)[2,2]+table(test.rf$loan_status,pred)[2,1]) # Class Test Error 
+#   
+#   cat(mtry," ") #printing the output to the console
+# }
+
+# plot the results
+# matplot(1:mtry , cbind(default.train.err,paid.train.err,default.test.err,paid.test.err), pch=19 , col=c("red","blue","darkred","darkblue"),type="b",ylab="Classification Error",xlab="Number of Predictors Considered at each Split")
+# legend("left",legend=c("Default Train Class.Error","Paid Train Class.Error","Default Test Class.Error","Paid Test Class.Error"),pch=19,  col=c("red","blue","darkred","darkblue"))
+
+rf.pred <- predict(rf.fit, newdata= test.rf)
+table(test.rf$loan_status,rf.pred)
+
+# Test errors and confusion matrix
+rf.matrix <- table(test.rf$loan_status,rf.pred)
+rf.overall.test.err = mean(rf.pred != test.rf$loan_status)
+rf.default.test.err= rf.matrix[1,2]/(rf.matrix[1,1]+rf.matrix[1,2]) # Class Test Error 
+rf.paid.test.err= rf.matrix[2,1]/(rf.matrix[2,2]+rf.matrix[2,1]) # Class Test Error 
+rf.matrix
+rf.default.test.err
+rf.paid.test.err
+rf.overall.test.err
+```
+
+The amount of mtry used in this approach was 4 as we noted that above 4 there was no great increase in accuracy. The most important predictor variables in the random forest are recoveries, followed by collection_recovery_fee. The error rate for the class defaulted is higher (3.14%) than the models seen before. We assume that the random forest did not train so well on the unbalanced data set. 
+
+<br><br>
+
+## KNN
+
+Now we model the data using K-Nearest-Neighbour
+```{r}
+# load previous df
+df.knn <- d2_sub
+#str(df.knn)              # Check 
+
+#drop NAs & columns with more than 50 levels or less than 2
+drop_na(df.knn) 
+less2levels <-  df.knn[, sapply(df.knn, function(col) length(unique(col))) < 2]
+plus50levels <-  df.knn[, sapply(df.knn, function(col) length(unique(col))) > 50]
+plus50levels <- plus50levels[, sapply(plus50levels, function(col) class(col) != "numeric")]
+plus50levels <- plus50levels[, sapply(plus50levels, function(col) class(col) != "integer")]
+rmv.col <- c(colnames(less2levels),colnames(plus50levels))
+# rmv.col                 # Check
+df.knn <- df.knn[ , !(names(df.knn) %in% rmv.col)]
+#str(df.knn)              # Check 
+
+# transform factors to numeric, except for loan_status
+str(df.knn)
+for(col in 1:ncol(df.knn)){
+  if(class(df.knn[,col]) %in% c('factor') && colnames(df.knn)[col] != 'loan_status'){
+    df.knn[,col] <- as.numeric(df.knn[,col])
+  }
+}
+#str(df.knn)              # Check 
+
+# devide and conquer 80% train.log, 20% test.data
+set.seed(13)
+indices <- sort(sample(1:nrow(df.knn), p80)) # select 100 random samples
+test.knn <- df.knn[-indices,]
+train.knn <- df.knn[indices,]
+
+# remove loan_status from test and train set
+y.train.knn <- train.knn$loan_status
+y.test.knn <- test.knn$loan_status
+train.knn <- subset(train.knn, select = -c(loan_status))
+test.knn <- subset(test.knn, select = -c(loan_status))
+#str(df.knn)              # Check 
+
+set.seed (1)
+knn.pred <- knn(train.knn,test.knn, y.train.knn,k=1)
+
+# Test errors and confusion matrix
+knn.matrix <- table(y.test.knn,knn.pred)
+knn.overall.test.err = mean(knn.pred != y.test.knn)
+knn.default.test.err= knn.matrix[1,2]/(knn.matrix[1,1]+knn.matrix[1,2]) # Class Test Error 
+knn.paid.test.err= knn.matrix[2,1]/(knn.matrix[2,2]+knn.matrix[2,1]) # Class Test Error 
+knn.matrix
+knn.default.test.err
+knn.paid.test.err
+knn.overall.test.err
+```
+
+The results of the KNN model do not look as accurate as the previous ones. We have a defaulted error rate of 26.3 %, a fully paid error rate of 2.8 %. The overall test error rate is 7.2 %. Thus, KNN does not seem as accurate as some previous models.
+
+<br><br>
+
+## Decision Tree
+Finally, we model data using a simple decision tree.
+
+```{r}
+# devide and conquer 80% train 20% test data
+set.seed(13)
+p80 <- nrow(df.pca)*0.8
+indices <- sort(sample(1:nrow(df.pca), p80)) # select 100 random samples
+test.tree <- df.pca[-indices,]
+train.tree <- df.pca[indices,]
+
+# fit the tree 
+tree.fit = tree(loan_status ~ . , data = train.tree)
+summary(tree.fit)
+plot(tree.fit)
+text(tree.fit, pretty = 0)
+tree.fit
+tree.pred <- predict(tree.fit,newdata = test.tree, type = "class")
+with(test.tree, table(tree.pred,test.tree$loan_status))
+
+# decision tree with CV 
+cvtree.fit = cv.tree(tree.fit, FUN=prune.misclass)
+plot(cvtree.fit)
+tree.prune.fit <- prune.misclass(tree.fit,best=3)
+tree.prune.fit
+tree.prune.pred <- predict(tree.prune.fit,newdata = test.tree, type = "class")
+
+# Test errors and confusion matrix for the pruned tree
+tree.matrix <- with(test.tree, table(tree.prune.pred,test.tree$loan_status))
+tree.overall.test.err = mean(tree.prune.pred != test.tree$loan_status)
+tree.default.test.err= tree.matrix[1,2]/(tree.matrix[1,1]+tree.matrix[1,2]) # Class Test Error 
+tree.paid.test.err= tree.matrix[2,1]/(tree.matrix[2,2]+tree.matrix[2,1]) # Class Test Error 
+tree.matrix
+tree.overall.test.err 
+tree.default.test.err
+tree.paid.test.err
+```
+
+The results of the decision tree look surprisingly good. The overall test error rate is 3.1 %, the defaulted test error rate is 1.4 % and the fully paid test error rate is 3.4%. The great advantage of this approach is how easy we can explain the results. By far the most important indicator in the pruned tree is the recoveries. If this value is above 0.01, then the model will forecast the loan to Default.
+
+<br><br>
+<br><br>
+
+## Discussion
+```{r}
+PCA <- c(pca.default.test.err,pca.paid.test.err,pca.overall.test.err)
+LogRegression <- c(log.default.test.err,log.paid.test.err,log.overall.test.err)
+RF <- c(rf.default.test.err,rf.paid.test.err,rf.overall.test.err)
+KNN <- c(knn.default.test.err,knn.paid.test.err,knn.overall.test.err)
+Tree <- c(tree.default.test.err,tree.paid.test.err,tree.overall.test.err)
+row.names <- c("Class:Defaulted Test Error", "Class:Paid Test Error", "Total:Test Error")
+all <- data.frame(PCA,LogRegression,RF,KNN,Tree,row.names = row.names ) 
+all
+all_transposed <- as.data.frame(t(all))
+all_transposed[order(all_transposed$`Total:Test Error`),]
+write.csv(all_transposed, file = "data/classification_methods_results.csv")
+```
+
+If the objective is to reduce the class error of the defaulted loans then the PCA in combination with a logistic regression would be the most appropriate method. If however the overall test error is the objective then a simple pruned tree model might be more appropriate. In addition, we should note that the PCA is an unsupervised method and is therefore inadequate for explaining models. Bottom line: The tree model offers the best solution that is explainable and understandable. 
+
+Following outlook could be considered. Further analysis could be done with PLS discriminant analysis which would allow computing for a categorical target variable. Because of time constraints, as well as lacking knowledge in this area, this was not further explored. A balanced data set could have been set up for the training of the models. This would imply that roughly 50% of the outcome would be "Defaulted" and 50% "Fully Paid". We would expect some models to perform better with a balanced training set. The team would have also liked more time to implement a Boosting model, which we would have expected to outperform the RF.
+
+<br><br>
+<br><br>
+
