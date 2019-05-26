@@ -1,6 +1,8 @@
-# Applied Machine Learning and Predictive Modeling Group Project
+# Applied Machine Learning and Predictive Modeling - Group Project
 
 University: [Master of Science in Applied Information & Data Science](https://www.hslu.ch/en/lucerne-school-of-business/degree-programmes/master/applied-information-and-data-science/)
+
+Module: Applied Machine Learning and Predictive Modelling
 
 Authors: Daniel Barco, Lars Gisler, Ramon Schildknecht, Marcel Ulrich, Carmela Wey
 
