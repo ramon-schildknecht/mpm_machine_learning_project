@@ -6,10 +6,10 @@ Module: Applied Machine Learning and Predictive Modelling
 
 Authors: Daniel Barco, Lars Gisler, Ramon Schildknecht, Marcel Ulrich, Carmela Wey
 
-Task: generate regression and classification models, details can be found [here](https://www.evernote.com/l/Ai-Onl2Oy4hL6KCP9yPgcxFT4t2k88VCfgo)
+Task: generate regression and classification models, details can be found in the folder "task"
 
 Results: can be found [here](https://rpubs.com/ramon_schildknecht/mpm_machine_learning_project)
 
-Code: can be found in the folder "final_solution_mpm_group3"
+Code/Data: can be found in the folder "final_solution_mpm_group3"
 
 
