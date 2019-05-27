@@ -12,7 +12,6 @@ output:
     df_print: paged
     theme: united
     toc: yes
-    # number_sections: true
     toc_float: true
   pdf_document:
     toc: yes
@@ -35,16 +34,16 @@ library(magrittr)
 
 
 ```{r message=FALSE, warning=FALSE}
-(regression_results <- read.csv("data/regression_methods_results.csv") %>% select(Model = model, MSE, R2))
+(regression_results <- read.csv("data/regression_methods_results.csv") %>% select(Model = model, Test_MSE, R2))
 ```
 
-According to our results the linear regression model approach with best subset selection has the smallest MSE (1.372) overall. The linear regression model with leave one out cross validation is nearly as good with a MSE of 1.375. The ridge and the lasso regression perform noticeable worse (MSE of 1.708 and 2.064). Details to the winnig model with best subset selection can be found below.
+According to our results the linear regression model approach with best subset selection has the smallest test MSE (1.372) overall. The linear regression model with leave one out cross validation is nearly as good with a test MSE of 1.375. The ridge and the lasso regression perform noticeable worse (test MSE of 1.708 and 2.064). Details to the winnig model with best subset selection can be found below.
 
 Question | Answer
 ------------- | -------------
 1. Is at least one of the predictores X1, X2, ..., Xp useful in predicting the response?  | First, one could reduce the possible predictors in the data preprocessing  part. One could remove 126 out of 147 possible predictors, because they would not explain the response at all (93 predictors with more than 5% missing values or just one level) or there were too many levels (more than 10). Some of the few 126 removed predictors were a human decision, especially if the predictors were not understable in regard to the response. Back to the original question: Yes, there were 31 predictors useful in predicting the response. Due to matrix transformation there are a lot of new dummy variables out of the 21 remaining predictors, for example grade, home_ownership or loan_status.
-2. Do all the predictors help to explain Y, or is only a subset of the predictors useful?  | No, only 31 of the preditors help to explain of the response. One could try to only take 23 predictors because one can reduce most of the test error with them. 
-3. How well does the model fit the data? How accurate is the prediction? | Quite well. The remaining test error (MSE) is 1.375. 
+2. Do all the predictors help to explain Y, or is only a subset of the predictors useful?  | No, only 31 of the preditors help to explain the response. One could try to only take 23 predictors because one can reduce most of the test error with them. 
+3. How well does the model fit the data? How accurate is the prediction? | Quite well. The remaining test error (MSE) is 1.372. 
 
 
 <br>
@@ -56,11 +55,11 @@ We performed the following methods and got the these results:
 
 ```{r message=FALSE, warning=FALSE}
 classification_results <- read.csv("data/classification_methods_results.csv")
-classification_results %>% rename(Model = X)
+classification_results %>% rename(Model = X) %>% arrange(Class.Defaulted.Test.Error)
 ```
 
 
-If the objective is to reduce the class error of the defaulted loans then the PCA in combination with a logistic regression would be the most appropriate method. If however the overall test error is the objective then a simple pruned tree model might be more appropriate. In addition, we should note that the PCA is an unsupervised method and is therefore inadequate for explaining models. Bottom line: The tree model offers the best solution that is explainable and understandable. 
+If the objective is to reduce overall test error then the PCA in combination with a logistic regression would be the most appropriate method. If however the class error of the defaulted loans is the objective then a simple pruned tree model might be more appropriate. In addition, we should note that the PCA is an unsupervised method and is therefore inadequate for explaining models. Bottom line: The tree model offers the best solution that is accurate, explainable and understandable.
 
 <br>
 <br>
@@ -659,10 +658,10 @@ The test MSE for the lasso regression model resulted in 2.604.
 
 ```{r}
 model_comparison <-  tibble(model = c("LM with LOOCV", "LM with Best Subset Selection", "Ridge Regression", "Lasso Regression"),
-       MSE = c(1.375, 1.372, 1.708, 2.604),
+       Test_MSE = c(1.375, 1.372, 1.708, 2.604),
        R2 = c(0.9263, 0.928, 0.9174, 0.8867))
 
-(model_comparison %<>% arrange(MSE))
+(model_comparison %<>% arrange(Test_MSE))
 write.csv(model_comparison, file = "data/regression_methods_results.csv")
 ```
 
@@ -681,7 +680,7 @@ Initial question | Answer
 
 ## Possible next steps
 One reasonable approach could involve testing non-linear regression models by checking the non-linearity of the response-predictor relationsships. 
-Additionally one could further investigate in problems such as outliers, collinearity or residual analysis (correlation of error termws, non-constant variance of error terms, ...). 
+Additionally one could further investigate in problems such as outliers, collinearity or residual analysis (correlation of error terms, non-constant variance of error terms, ...). 
 Finally one should better understand the business domain to improve model results and interpretation.
 Furthermore the numerical predictors could be standardized before applying various regression models, so that all predictors are on the same scale.
 
@@ -1125,7 +1124,7 @@ all_transposed[order(all_transposed$`Total:Test Error`),]
 write.csv(all_transposed, file = "data/classification_methods_results.csv")
 ```
 
-If the objective is to reduce the class error of the defaulted loans then the PCA in combination with a logistic regression would be the most appropriate method. If however the overall test error is the objective then a simple pruned tree model might be more appropriate. In addition, we should note that the PCA is an unsupervised method and is therefore inadequate for explaining models. Bottom line: The tree model offers the best solution that is explainable and understandable. 
+If the objective is to reduce overall test error then the PCA in combination with a logistic regression would be the most appropriate method. If however the class error of the defaulted loans is the objective then a simple pruned tree model might be more appropriate. In addition, we should note that the PCA is an unsupervised method and is therefore inadequate for explaining models. Bottom line: The tree model offers the best solution that is accurate, explainable and understandable.
 
 Following outlook could be considered. Further analysis could be done with PLS discriminant analysis which would allow computing for a categorical target variable. Because of time constraints, as well as lacking knowledge in this area, this was not further explored. A balanced data set could have been set up for the training of the models. This would imply that roughly 50% of the outcome would be "Defaulted" and 50% "Fully Paid". We would expect some models to perform better with a balanced training set. The team would have also liked more time to implement a Boosting model, which we would have expected to outperform the RF.
 
